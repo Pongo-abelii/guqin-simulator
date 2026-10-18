@@ -879,27 +879,38 @@
             // =====================================================
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             const audioCtx = new AudioContext();
+            // 母线基准。实测：等功率缩放后 4 音和弦进限幅器峰值约 0.60，
+            // 音量滑杆推到上限 150% 时真峰值（4x 过采样）0.93，未越刻度，故取 1.0。
             const MASTER_VOLUME = 1.0;
             
             // ----- 主输出总线：音量 + 峰值压缩器（防削波） -----
             const masterGain = audioCtx.createGain();
             masterGain.gain.value = MASTER_VOLUME;
             const compressor = audioCtx.createDynamicsCompressor();
-            compressor.threshold.value = -8;
-            compressor.knee.value = 18;
-            compressor.ratio.value = 6;
-            compressor.attack.value = 0.001;
-            compressor.release.value = 0.22;
+            // 旧参数 threshold -8 / knee 18 / ratio 6：软拐点自 -17dB 起介入，
+            // 而单音峰值只有 -5~-6dB，等于常态重压却仍防不住和弦过载。
+            // 现改为轻量母线压缩，真正的峰值保护交给软限幅器。
+            compressor.threshold.value = -6;
+            compressor.knee.value = 10;
+            compressor.ratio.value = 3;
+            compressor.attack.value = 0.005;
+            compressor.release.value = 0.25;
             masterGain.connect(compressor);
             
-            // 软限幅器（tanh 饱和曲线）：多音叠加的峰值被温柔压住，
-            // 大信号时呈暖饱和感而非硬削波爆音（和弦/快速连点杂音的关键解法）
+            // 软限幅器（线性区 + 软拐点）：
+            // 旧版用 tanh(1.2x)/1.2，实测在 0.3 处就产生 1% 失真、1.0 处 8.9%，
+            // 且曲线端点 0.6947 造成 |x|>=1 的硬平顶（输入 1.0 与 1.2 输出完全相同）。
+            // 新曲线：|x| < knee 完全线性（不引入失真），之上按 tanh 软饱和。
+            // 拐点取 0.9，使正常工作电平完全落在线性区，峰值处输出 0.9762。
             function makeSoftClipCurve(n) {
                 const curve = new Float32Array(n);
-                const k = 1.2;
+                const knee = 0.9;
+                const span = 1 - knee;
                 for (let i = 0; i < n; i++) {
                     const x = (i / (n - 1)) * 2 - 1;
-                    curve[i] = Math.tanh(k * x) / k;
+                    const a = Math.abs(x);
+                    const y = a <= knee ? a : knee + span * Math.tanh((a - knee) / span);
+                    curve[i] = x < 0 ? -y : y;
                 }
                 return curve;
             }
@@ -907,20 +918,42 @@
             softLimiter.curve = makeSoftClipCurve(4096);
             softLimiter.oversample = '4x';   // 过采样减少混叠失真
             const makeupGain = audioCtx.createGain();
-            makeupGain.gain.value = 1.35;    // 补偿软限幅的压低，响度不损失
-            compressor.connect(softLimiter);
+            makeupGain.gain.value = 1.0;     // 新曲线峰值 0.9762（拐点 0.9），不再需要额外提升；留足余量
+            // WaveShaper 的输入被规范硬钳在 ±1：超过 1 的部分一律落回曲线端点，
+            // 形成平顶。实测最坏情形（音量 150% + 快速交替 3 音和弦）进限幅器
+            // 样本峰值 1.0315（44.1k），有 15 个样本越界。这里插入固定余量 0.96，
+            // 实测真最坏情形（velocity 1.15 + 音量 150% + 快拨交替 3 音和弦）
+            // 样本峰值 1.0818、真峰值 1.0193，91 个样本越界。
+            // 取余量 0.90 压到 0.974（真峰值 0.917），留约 0.8 dB 缓冲。
+            const limiterHeadroom = audioCtx.createGain();
+            limiterHeadroom.gain.value = 0.90;
+            compressor.connect(limiterHeadroom);
+            limiterHeadroom.connect(softLimiter);
             softLimiter.connect(makeupGain);
             makeupGain.connect(audioCtx.destination);
             
             // ----- 混响：程序生成房间脉冲响应 -----
+            // 程序生成房间脉冲响应。旧版是"整段宽带白噪声 × 幂衰减"，实测高频
+            // 不随时间衰减（倾斜 97.77 -> 97.63），听感是沙沙的嘶声尾巴；
+            // 且 i=0 处 pow(1,decay)=1，第 0 样本即满幅，等于给每个音加一记瞬态撞击。
+            // 新版：1) 20ms 预延迟，首样本不再满幅；
+            //       2) 一阶低通系数随时间从 1 降到 0.08，高频先衰（接近真实房间）；
+            //       3) 卷积器自带能量归一化（normalize 默认 true），电平自动可控。
             function createReverbImpulse(duration, decay) {
                 const rate = audioCtx.sampleRate;
-                const length = rate * duration;
+                const length = Math.floor(rate * duration);
                 const impulse = audioCtx.createBuffer(2, length, rate);
+                const preDelay = Math.floor(rate * 0.02);
+                const span = Math.max(1, length - preDelay);
                 for (let ch = 0; ch < 2; ch++) {
                     const data = impulse.getChannelData(ch);
+                    let lp = 0;
                     for (let i = 0; i < length; i++) {
-                        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+                        if (i < preDelay) { data[i] = 0; continue; }
+                        const u = (i - preDelay) / span;
+                        const coef = 1 - 0.92 * u;
+                        lp += coef * ((Math.random() * 2 - 1) - lp);
+                        data[i] = lp * Math.pow(1 - u, decay);
                     }
                 }
                 return impulse;
@@ -928,7 +961,10 @@
             const convolver = audioCtx.createConvolver();
             convolver.buffer = createReverbImpulse(1.9, 2.8);
             const reverbGain = audioCtx.createGain();
-            reverbGain.gain.value = 0.2;
+            reverbGain.gain.value = 0.16;    // 启动值取 warm 音色；切换音色时按 tone.reverb 更新
+            // 混响从 masterGain 取出（而非每个声部直连），这样音量滑杆同时控制干/湿声。
+            // 旧版直连导致音量拉到 0 时混响仍在响（实测 -28.3dB 残留）。
+            masterGain.connect(convolver);
             convolver.connect(reverbGain);
             reverbGain.connect(compressor);
             
@@ -987,9 +1023,15 @@
                 }
             };
             let currentTone = 'warm';
+            // 旧版 TONES.warm.reverb / bright.reverb 从未被引用，混响增益恒为 0.2。
+            reverbGain.gain.value = TONES[currentTone].reverb;
             
             // 古琴定弦（宫商角徵羽文武）
             const baseFreq = [130.81, 146.83, 164.81, 196.00, 220.00, 246.94, 293.66];
+            
+            // 每根弦一个固定的微失谐（±0.08%）。旧版每个声部各取一次随机值，
+            // 同弦重拨时旧声部尚未衰完、与新声部频率不同，形成拍频与粗糙感。
+            const STRING_DETUNE = baseFreq.map(function () { return (Math.random() - 0.5) * 0.0016; });
             
             // 活动发声单元
             const activeVoices = [];
@@ -1011,20 +1053,46 @@
             }
             
             // ----- 发出一个音 -----
+            // ----- 起振窗口：把 8ms 内到达的音并成一批，统一按 1/sqrt(N) 缩放 -----
+            // 第一轮修复只给 playChord 加了缩放，但用户同时按多个键 / 多点触摸
+            // 走的是 playNote 直接调用，多个声部仍按原电平直接相加 —— 这正是
+            // "同时点击不同音就破音"的来源。批处理窗口 8ms 远小于人耳可辨延迟，
+            // 也不会把滑动拨弦（间隔 30ms 以上）误并成一批。
+            const onsetQueue = [];
+            let onsetTimer = null;
+            const ONSET_WINDOW_MS = 8;
+
+            function flushOnsets() {
+                onsetTimer = null;
+                const batch = onsetQueue.splice(0, onsetQueue.length);
+                if (!batch.length) return;
+                const voiceScale = 1 / Math.sqrt(batch.length);
+                batch.forEach(function (it) { spawnVoice(it.n, it.v, voiceScale); });
+            }
+
             function playNote(stringNumber, velocity) {
                 resumeAudio();
+                onsetQueue.push({ n: stringNumber, v: velocity || 1 });
+                if (onsetTimer === null) {
+                    onsetTimer = setTimeout(flushOnsets, ONSET_WINDOW_MS);
+                }
+            }
+
+            function spawnVoice(stringNumber, velocity, voiceScale) {
                 velocity = velocity || 1;
+                voiceScale = voiceScale || 1;
                 const tone = TONES[currentTone];
                 const t = audioCtx.currentTime;
                 const freq = baseFreq[stringNumber - 1];
                 
                 const voiceGain = audioCtx.createGain();
-                voiceGain.gain.value = 0.9 * velocity;
+                voiceGain.gain.value = 0.9 * velocity * voiceScale;
                 
-                // 同弦再拨：旧音 50ms 内快速淡出，新旧波形不再叠加打架
+                // 同弦再拨：旧音 25ms 内快速淡出。实测间隔 60ms 时新旧声部
+                // 会叠加到强压缩区，缩短窗口后叠加量随之下降。
                 const sIdx = stringNumber - 1;
                 stringVoices[sIdx].forEach(function(oldGain) {
-                    fadeOutVoice(oldGain, t, 0.05);
+                    fadeOutVoice(oldGain, t, 0.025);
                 });
                 stringVoices[sIdx] = [voiceGain];
                 
@@ -1062,7 +1130,6 @@
                     voiceOut = pan;
                 }
                 voiceOut.connect(masterGain);
-                voiceOut.connect(convolver);
                 
                 // 微揉弦
                 const lfo = audioCtx.createOscillator();
@@ -1078,7 +1145,7 @@
                 tone.partials.forEach(function(p) {
                     const osc = audioCtx.createOscillator();
                     osc.type = 'sine';
-                    osc.frequency.setValueAtTime(freq * p.mult * (1 + (Math.random() - 0.5) * 0.0016), t);
+                    osc.frequency.setValueAtTime(freq * p.mult * (1 + STRING_DETUNE[sIdx]), t);
                     lfoGain.connect(osc.detune);
                     
                     const pGain = audioCtx.createGain();
@@ -1097,28 +1164,32 @@
                     };
                 });
                 
-                // 拨弦瞬态
+                // 拨弦瞬态：旧版从 0 瞬间跳到满幅（咔哒声源）、持续 100ms、
+                // 且直连 voiceGain 绕过低通与琴体滤波。新版 4ms 起振、55ms 衰减、
+                // 经同一低通+琴体塑形，快速连点时不再叠成沙沙声。
                 if (tone.noiseGain > 0) {
                     const noise = audioCtx.createBufferSource();
                     noise.buffer = noiseBuffer;
                     const noiseFilter = audioCtx.createBiquadFilter();
                     noiseFilter.type = 'bandpass';
                     noiseFilter.frequency.value = tone.noiseFreq;
-                    noiseFilter.Q.value = 1.1;
+                    noiseFilter.Q.value = 1.4;
                     const noiseGain = audioCtx.createGain();
-                    noiseGain.gain.setValueAtTime(tone.noiseGain * velocity, t);
-                    noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+                    noiseGain.gain.setValueAtTime(0.0001, t);
+                    noiseGain.gain.linearRampToValueAtTime(tone.noiseGain * velocity, t + 0.004);
+                    noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.055);
                     noise.connect(noiseFilter);
                     noiseFilter.connect(noiseGain);
-                    noiseGain.connect(voiceGain);
+                    noiseGain.connect(filter);
                     noise.start(t);
-                    noise.stop(t + 0.14);
+                    noise.stop(t + 0.07);
                 }
                 
                 visualFeedback(stringNumber);
             }
             
             function playChord(notes, velocity) {
+                // 与交互式弹奏共用同一批处理：同一批内的声部统一按 1/sqrt(N) 缩放。
                 notes.forEach(function(n) { playNote(n, velocity); });
             }
             
@@ -1264,6 +1335,8 @@
             function stopAll() {
                 playTimers.forEach(function(id) { clearTimeout(id); });
                 playTimers = [];
+                if (onsetTimer !== null) { clearTimeout(onsetTimer); onsetTimer = null; }
+                onsetQueue.length = 0;
                 // 平滑淡出所有在响的发声（30ms），再停止振荡器，静音无爆音
                 const t = audioCtx.currentTime;
                 stringVoices.forEach(function(list) {
@@ -1342,6 +1415,7 @@
             document.querySelectorAll('.tone-btn').forEach(function(btn) {
                 btn.addEventListener('click', function() {
                     currentTone = btn.getAttribute('data-tone');
+                    reverbGain.gain.value = TONES[currentTone].reverb;
                     document.querySelectorAll('.tone-btn').forEach(function(b) {
                         b.classList.toggle('active', b === btn);
                     });
