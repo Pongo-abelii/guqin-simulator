@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2025古琴模拟器 - 在线弹奏</title>
+    <meta name="description" content="2025古琴模拟器 - 水墨古风在线弹奏古琴，支持曲谱自动演奏、和弦、双音色切换。">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        /* ================= 宣纸水墨配色 ================= */
+        body {
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            background:
+                radial-gradient(ellipse at 20% 10%, rgba(255, 255, 255, 0.5), transparent 55%),
+                radial-gradient(ellipse at 85% 80%, rgba(190, 180, 160, 0.25), transparent 50%),
+                linear-gradient(165deg, #f8f5ee 0%, #f2ede2 45%, #e9e2d2 100%);
+            color: #33302b;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 14px;
+            overflow-x: hidden;
+        }
+        
+        /* 楷体标题 */
+        h1, h2, h3, .seal, .string-name {
+            font-family: 'STKaiti', 'KaiTi', '华文楷体', 'SimSun', serif;
+        }
+        
+        .header {
+            position: relative;
+            text-align: center;
+            margin-bottom: 18px;
+            width: 100%;
+            padding: 18px 20px 26px;
+            background: rgba(255, 255, 255, 0.45);
+            border: 1px solid #d5cdbb;
+            border-radius: 4px;
+            box-shadow: 0 3px 12px rgba(90, 80, 65, 0.12);
+            overflow: hidden;
+        }
+        
+        /* 淡墨远山装饰 */
+        .mountains {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: -1px;
+            width: 100%;
+            height: 46px;
+            opacity: 0.55;
+        }
+        
+        .title-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+        }
+        
+        h1 {
+            font-size: 2.4rem;
+            color: #2c2925;
+            letter-spacing: 6px;
+        }
+        
+        /* 朱砂印章 */
+        .seal {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            background: #a8322d;
+            color: #f8f5ee;
+            padding: 5px 7px;
+            line-height: 1.15;
+            border-radius: 2px;
+            font-size: 1rem;
+            letter-spacing: 1px;
+            transform: rotate(-3deg);
+            box-shadow: 0 2px 5px rgba(140, 40, 35, 0.35);
+        }
+        
+        .subtitle {
+            font-size: 1.12rem;
+            color: #7a746a;
+            font-style: normal;
+            letter-spacing: 3px;
+            margin-top: 6px;
+        }
+        
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 920px;
+        }
+        
+        /* ================= 古琴面板 ================= */
+        .guqin-container {
+            position: relative;
+            width: 100%;
+            height: 330px;
+            margin-bottom: 18px;
+            perspective: 1000px;
+        }
+        
+        .guqin-body {
+            position: absolute;
+            width: 90%;
+            height: 190px;
+            background: linear-gradient(to bottom, #35302a, #211d18);
+            border-radius: 10px;
+            top: 70px;
+            left: 5%;
+            box-shadow: 0 12px 30px rgba(60, 50, 40, 0.35);
+            border: 1px solid #57503f;
+            transform: rotateX(5deg);
+            transition: transform 0.3s;
+        }
+        
+        /* 琴弦区域：纵向滑动照常滚动页面，横向滑动拨弦 */
+        .guqin-strings {
+            position: absolute;
+            width: 85%;
+            height: 190px;
+            top: 70px;
+            left: 7.5%;
+            display: flex;
+            justify-content: space-between;
+            z-index: 2;
+            touch-action: pan-y;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        
+        .string {
+            position: relative;
+            width: 2px;
+            height: 100%;
+            background: linear-gradient(to bottom, transparent 5%, #f2ead8 15%, #d8c9a8 50%, #f2ead8 85%, transparent 95%);
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.3s;
+            box-shadow: 0 0 6px rgba(240, 225, 190, 0.5);
+        }
+        
+        /* 触摸/点击热区加宽 */
+        .string::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: -13px;
+            right: -13px;
+        }
+        
+        .string:hover {
+            background: linear-gradient(to bottom, transparent 5%, #fffdf5 15%, #f5e6c0 50%, #fffdf5 85%, transparent 95%);
+            box-shadow: 0 0 10px rgba(250, 235, 200, 0.9);
+        }
+        
+        .string:active {
+            transform: translateX(-3px) scale(1.8);
+            background: linear-gradient(to bottom, transparent 5%, #ffffff 15%, #ffffff 50%, #ffffff 85%, transparent 95%);
+            box-shadow: 0 0 12px rgba(255, 255, 255, 0.95);
+            opacity: 0.95;
+        }
+        
+        /* 拨弦振动动画 */
+        .string.plucked {
+            animation: vibrate 0.45s ease-out;
+            background: linear-gradient(to bottom, transparent 5%, #ffffff 15%, #f5e6c0 50%, #ffffff 85%, transparent 95%);
+            box-shadow: 0 0 12px rgba(255, 250, 235, 0.95);
+        }
+        
+        @keyframes vibrate {
+            0%   { transform: translateX(0) scale(1.8); }
+            15%  { transform: translateX(-3px) scale(1.7); }
+            30%  { transform: translateX(2.5px) scale(1.55); }
+            45%  { transform: translateX(-2px) scale(1.4); }
+            60%  { transform: translateX(1.5px) scale(1.25); }
+            75%  { transform: translateX(-1px) scale(1.12); }
+            100% { transform: translateX(0) scale(1); }
+        }
+        
+        /* 拨弦涟漪（朱砂墨圈） */
+        .ripple {
+            position: absolute;
+            border: 2px solid rgba(168, 50, 45, 0.65);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 3;
+            animation: ripple-out 0.7s ease-out forwards;
+        }
+        
+        @keyframes ripple-out {
+            0%   { width: 6px; height: 6px; opacity: 0.85; }
+            100% { width: 90px; height: 90px; opacity: 0; }
+        }
+        
+        .guqin-markers {
+            position: absolute;
+            width: 85%;
+            height: 30px;
+            bottom: 38px;
+            left: 7.5%;
+            display: flex;
+            justify-content: space-between;
+            z-index: 1;
+        }
+        
+        .marker {
+            width: 8px;
+            height: 8px;
+            background-color: #a8322d;
+            border-radius: 50%;
+            box-shadow: 0 0 5px rgba(168, 50, 45, 0.5);
+        }
+        
+        .string-names {
+            position: absolute;
+            width: 85%;
+            top: 28px;
+            left: 7.5%;
+            display: flex;
+            justify-content: space-between;
+            color: #5c554a;
+            font-weight: bold;
+            font-size: 1.15rem;
+            letter-spacing: 1px;
+        }
+        
+        .string-name {
+            width: 30px;
+            text-align: center;
+        }
+        
+        /* ================= 控制区 ================= */
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 18px;
+            width: 100%;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background: #3b3733;
+            color: #f5f1e8;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.25s;
+            box-shadow: 0 3px 8px rgba(60, 50, 40, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            background: #a8322d;
+            box-shadow: 0 6px 14px rgba(140, 40, 35, 0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .icon {
+            width: 1em;
+            height: 1em;
+            fill: currentColor;
+            flex-shrink: 0;
+        }
+        
+        /* 音色切换 */
+        .tone-switch {
+            display: flex;
+            border: 1px solid #b7ad99;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .tone-btn {
+            padding: 9px 18px;
+            background: rgba(255, 255, 255, 0.5);
+            color: #5c554a;
+            border-radius: 0;
+            box-shadow: none;
+        }
+        
+        .tone-btn:hover {
+            transform: none;
+            box-shadow: none;
+            background: #efe9da;
+            color: #a8322d;
+        }
+        
+        .tone-btn:active {
+            transform: none;
+        }
+        
+        .tone-btn.active {
+            background: #a8322d;
+            color: #f8f5ee;
+        }
+        
+        /* 参数滑块 */
+        .param {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 13px;
+            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid #b7ad99;
+            border-radius: 3px;
+            color: #5c554a;
+            font-size: 0.95rem;
+        }
+        
+        .param output {
+            color: #a8322d;
+            min-width: 56px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 110px;
+            height: 5px;
+            background: linear-gradient(to right, #a8322d, #c9bda2);
+            border-radius: 3px;
+            outline: none;
+            cursor: pointer;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #3b3733;
+            border: 2px solid #f8f5ee;
+            cursor: pointer;
+            box-shadow: 0 1px 5px rgba(60, 50, 40, 0.4);
+        }
+        
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #3b3733;
+            border: 2px solid #f8f5ee;
+            cursor: pointer;
+        }
+        
+        /* ================= 曲谱演奏区 ================= */
+        .composer {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.5);
+            padding: 18px;
+            border: 1px solid #d5cdbb;
+            border-radius: 4px;
+            box-shadow: 0 3px 12px rgba(90, 80, 65, 0.1);
+            margin-bottom: 16px;
+        }
+        
+        .composer h2 {
+            margin-bottom: 12px;
+            color: #2c2925;
+            font-size: 1.45rem;
+            letter-spacing: 3px;
+        }
+        
+        .composer textarea {
+            width: 100%;
+            min-height: 135px;
+            background: rgba(255, 253, 247, 0.85);
+            color: #33302b;
+            border: 1px solid #c5bba4;
+            border-radius: 3px;
+            padding: 12px;
+            font-family: Consolas, Monaco, 'Courier New', monospace;
+            font-size: 0.98rem;
+            line-height: 1.8;
+            resize: vertical;
+        }
+        
+        .composer textarea:focus {
+            outline: none;
+            border-color: #a8322d;
+            box-shadow: 0 0 8px rgba(168, 50, 45, 0.2);
+        }
+        
+        .composer-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 9px;
+            align-items: center;
+            margin-top: 11px;
+        }
+        
+        .composer-toolbar button {
+            padding: 9px 16px;
+            font-size: 0.95rem;
+        }
+        
+        .song-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 9px;
+            margin-top: 11px;
+            padding-top: 11px;
+            border-top: 1px dashed #c5bba4;
+            color: #7a746a;
+            font-size: 0.95rem;
+        }
+        
+        .song {
+            padding: 7px 14px;
+            background: rgba(255, 255, 255, 0.6);
+            color: #5c554a;
+            border: 1px solid #b7ad99;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.25s;
+            font-size: 0.92rem;
+        }
+        
+        .song:hover {
+            background: #a8322d;
+            color: #f8f5ee;
+            border-color: #a8322d;
+        }
+        
+        .score-help {
+            margin-top: 10px;
+            color: #8a8375;
+            font-size: 0.88rem;
+            line-height: 1.7;
+        }
+        
+        .score-help code {
+            color: #a8322d;
+            font-family: Consolas, Monaco, monospace;
+        }
+        
+        /* ================= 文档说明（折叠） ================= */
+        .doc {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid #d5cdbb;
+            border-radius: 4px;
+            box-shadow: 0 3px 12px rgba(90, 80, 65, 0.1);
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+        
+        .doc summary {
+            padding: 13px 18px;
+            cursor: pointer;
+            color: #2c2925;
+            font-size: 1.15rem;
+            font-family: 'STKaiti', 'KaiTi', '华文楷体', 'SimSun', serif;
+            letter-spacing: 2px;
+            user-select: none;
+        }
+        
+        .doc summary:hover {
+            color: #a8322d;
+        }
+        
+        .doc summary::marker {
+            color: #a8322d;
+        }
+        
+        .doc-body {
+            padding: 4px 18px 18px;
+        }
+        
+        .doc-body h3 {
+            color: #a8322d;
+            font-size: 1.12rem;
+            margin: 16px 0 8px;
+            letter-spacing: 2px;
+        }
+        
+        .doc-body p {
+            color: #5c554a;
+            line-height: 1.85;
+            font-size: 0.95rem;
+        }
+        
+        .doc-body ul {
+            margin: 6px 0 6px 22px;
+            color: #5c554a;
+            line-height: 1.9;
+            font-size: 0.95rem;
+        }
+        
+        .doc-body table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 8px 0 12px;
+            font-size: 0.92rem;
+        }
+        
+        .doc-body th {
+            background: rgba(168, 50, 45, 0.08);
+            color: #6b322c;
+            padding: 8px 10px;
+            border: 1px solid #d5cdbb;
+            font-weight: bold;
+        }
+        
+        .doc-body td {
+            padding: 7px 10px;
+            border: 1px solid #d5cdbb;
+            color: #4d463c;
+            text-align: center;
+        }
+        
+        .doc-body tr:nth-child(even) td {
+            background: rgba(235, 228, 212, 0.35);
+        }
+        
+        .doc-body code {
+            background: rgba(168, 50, 45, 0.08);
+            color: #a8322d;
+            padding: 1px 7px;
+            border-radius: 2px;
+            font-family: Consolas, Monaco, monospace;
+            font-size: 0.9em;
+        }
+        
+        .doc-body pre {
+            background: rgba(235, 228, 212, 0.5);
+            border-left: 3px solid #a8322d;
+            padding: 10px 14px;
+            margin: 8px 0;
+            border-radius: 2px;
+            font-family: Consolas, Monaco, monospace;
+            font-size: 0.9rem;
+            line-height: 1.9;
+            color: #4d463c;
+            overflow-x: auto;
+        }
+        
+        footer {
+            margin: 8px 0 20px;
+            text-align: center;
+            color: #9a927f;
+            font-size: 0.9rem;
+            padding: 10px;
+            width: 100%;
+        }
+        
+        /* ================= 响应式 ================= */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.85rem;
+                letter-spacing: 3px;
+            }
+            
+            .subtitle {
+                font-size: 0.98rem;
+                letter-spacing: 1px;
+            }
+            
+            .seal {
+                font-size: 0.85rem;
+            }
+            
+            .guqin-body {
+                height: 165px;
+            }
+            
+            .guqin-strings {
+                height: 165px;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .controls > button,
+            .tone-switch,
+            .param {
+                width: 100%;
+            }
+            
+            .controls > button {
+                justify-content: center;
+            }
+            
+            .tone-btn {
+                flex: 1;
+                justify-content: center;
+            }
+            
+            .param {
+                justify-content: space-between;
+            }
+            
+            input[type="range"] {
+                width: 42%;
+            }
+            
+            .composer-toolbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .composer-toolbar button {
+                width: 100%;
+                justify-content: center;
+            }
+            
+            .song-row .song {
+                flex: 1;
+                text-align: center;
+            }
+            
+            .doc-body table {
+                font-size: 0.82rem;
+            }
+            
+            .doc-body th, .doc-body td {
+                padding: 5px 4px;
+            }
+        }
+        
+        /* ================= 动画 ================= */
+        @keyframes glow {
+            0% { box-shadow: 0 0 4px rgba(168, 50, 45, 0.35); }
+            50% { box-shadow: 0 0 14px rgba(168, 50, 45, 0.55); }
+            100% { box-shadow: 0 0 4px rgba(168, 50, 45, 0.35); }
+        }
+        
+        .glow-effect {
+            animation: glow 2s infinite;
+        }
+        
+        /* 墨点粒子背景 */
+        .particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            overflow: hidden;
+        }
+        
+        .particle {
+            position: absolute;
+            background-color: rgba(120, 105, 85, 0.22);
+            border-radius: 50%;
+        }
+        
+        @keyframes float {
+            0% {
+                transform: translateY(0) translateX(0);
+                opacity: 0.25;
+            }
+            50% {
+                opacity: 0.6;
+            }
+            100% {
+                transform: translateY(-100vh) translateX(20px);
+                opacity: 0.25;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="particles" id="particles"></div>
+    
+    <div class="header">
+        <div class="title-row">
+            <h1>古琴模拟器</h1>
+            <span class="seal">古<br>琴</span>
+        </div>
+        <p class="subtitle">轻抚琴弦 · 感受千年雅韵</p>
+        <svg class="mountains" viewBox="0 0 1200 46" preserveAspectRatio="none">
+            <path d="M0,46 L0,30 Q90,8 180,24 T340,20 Q430,2 520,22 T700,18 Q800,6 900,24 T1080,16 L1200,26 L1200,46 Z" fill="#8a8375"/>
+            <path d="M0,46 L0,38 Q150,20 300,33 T600,30 Q750,16 900,34 T1200,30 L1200,46 Z" fill="#5c554a"/>
+        </svg>
+    </div>
+    
+    <div class="container">
+        <!-- ===== 古琴面板 ===== -->
+        <div class="guqin-container">
+            <div class="guqin-body"></div>
+            <div class="string-names">
+                <div class="string-name">宫</div>
+                <div class="string-name">商</div>
+                <div class="string-name">角</div>
+                <div class="string-name">徵</div>
+                <div class="string-name">羽</div>
+                <div class="string-name">文</div>
+                <div class="string-name">武</div>
+            </div>
+            <div class="guqin-strings">
+                <div class="string" data-note="1"></div>
+                <div class="string" data-note="2"></div>
+                <div class="string" data-note="3"></div>
+                <div class="string" data-note="4"></div>
+                <div class="string" data-note="5"></div>
+                <div class="string" data-note="6"></div>
+                <div class="string" data-note="7"></div>
+            </div>
+            <div class="guqin-markers">
+                <div class="marker"></div>
+                <div class="marker"></div>
+                <div class="marker"></div>
+                <div class="marker"></div>
+                <div class="marker"></div>
+                <div class="marker"></div>
+                <div class="marker"></div>
+            </div>
+        </div>
+        
+        <!-- ===== 演奏控制 ===== -->
+        <div class="controls">
+            <button id="play-all" class="glow-effect">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>自动演奏
+            </button>
+            <button id="reset">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>停止
+            </button>
+            <button id="tutorial">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M6 2h11a2 2 0 0 1 2 2v16H8a2 2 0 0 1-2-2V2zm2 2v12a2 2 0 0 0 2 2h8V4H8z"/></svg>教程
+            </button>
+            <div class="tone-switch">
+                <button class="tone-btn active" data-tone="warm">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2zM9 18h6v1.5a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 19.5V18z"/></svg>柔和
+                </button>
+                <button class="tone-btn" data-tone="bright">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm-1-6h2v3h-2V1zm0 19h2v3h-2v-3zM1 11h3v2H1v-2zm19 0h3v2h-3v-2zM4.2 2.8l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4zm13.5 13.5l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4zM4.2 21.2l1.4-1.4 2.1 2.1-1.4 1.4-2.1-2.1zM17.7 4.9l1.4 1.4-2.1 2.1-1.4-1.4 2.1-2.1z"/></svg>明亮
+                </button>
+            </div>
+            <div class="param">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 2.2v2.1a7.8 7.8 0 0 1 0 15.4v2.1a9.9 9.9 0 0 0 0-19.6z"/></svg>
+                <span>音量</span>
+                <input type="range" id="volume" min="0" max="150" value="100">
+            </div>
+        </div>
+        
+        <!-- ===== 曲谱演奏 ===== -->
+        <div class="composer">
+            <h2>曲谱演奏</h2>
+            <textarea id="score" spellcheck="false" placeholder="在这里输入曲谱……"></textarea>
+            <div class="composer-toolbar">
+                <button id="play-score">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>演奏曲谱
+                </button>
+                <button id="stop-score">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>停止
+                </button>
+                <button id="score-example">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>示例
+                </button>
+                <button id="score-clear">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M19 6.4L17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4z"/></svg>清空
+                </button>
+                <div class="param">
+                    <span>速度</span>
+                    <input type="range" id="speed" min="100" max="1500" step="50" value="300">
+                    <output id="speed-out">300 ms</output>
+                </div>
+                <div class="param">
+                    <span>停顿</span>
+                    <input type="range" id="rest" min="100" max="3000" step="100" value="600">
+                    <output id="rest-out">600 ms</output>
+                </div>
+            </div>
+            <div class="song-row">
+                <span>载入示范曲谱：</span>
+                <div class="song" data-song="1">《梅花三弄》片段</div>
+                <div class="song" data-song="2">《阳关三叠》片段</div>
+                <div class="song" data-song="3">《高山流水》片段</div>
+            </div>
+            <div class="score-help">
+                速查：<code>1-7</code> 拨弦 · <code>0</code> 停顿 · <code>1+3+5</code> 和弦 · <code>音:毫秒</code> 自定义间隔 · <code>#</code> 注释 · 详细写法见下方文档
+            </div>
+        </div>
+        
+        <!-- ===== 文档说明 ===== -->
+        <details class="doc">
+            <summary>📖 使用说明 与 曲谱写法详解（点击展开）</summary>
+            <div class="doc-body">
+                <h3>一、弹奏方式</h3>
+                <ul>
+                    <li><b>鼠标 / 触摸</b>：点击琴弦即发声；按住横向滑动，划过哪根弦就拨哪根弦</li>
+                    <li><b>键盘</b>：数字 <code>1</code>-<code>7</code> 或字母 <code>A S D F G H J</code> 对应七根弦；<b>多键同时按下即为和弦</b></li>
+                    <li><b>手机</b>：点按、横滑拨弦；上下滑动翻页不受影响</li>
+                </ul>
+                
+                <h3>二、琴弦与音高对照</h3>
+                <p>曲谱里的数字就是琴弦的编号，从左到右（宫到武）依次为 1 到 7：</p>
+                <table>
+                    <tr><th>曲谱数字</th><th>弦名</th><th>音名</th><th>频率</th><th>键盘</th></tr>
+                    <tr><td><code>1</code></td><td>宫</td><td>C3</td><td>130.81 Hz</td><td>1 / A</td></tr>
+                    <tr><td><code>2</code></td><td>商</td><td>D3</td><td>146.83 Hz</td><td>2 / S</td></tr>
+                    <tr><td><code>3</code></td><td>角</td><td>E3</td><td>164.81 Hz</td><td>3 / D</td></tr>
+                    <tr><td><code>4</code></td><td>徵</td><td>G3</td><td>196.00 Hz</td><td>4 / F</td></tr>
+                    <tr><td><code>5</code></td><td>羽</td><td>A3</td><td>220.00 Hz</td><td>5 / G</td></tr>
+                    <tr><td><code>6</code></td><td>文</td><td>B3</td><td>246.94 Hz</td><td>6 / H</td></tr>
+                    <tr><td><code>7</code></td><td>武</td><td>D4</td><td>293.66 Hz</td><td>7 / J</td></tr>
+                </table>
+                
+                <h3>三、曲谱记号详解</h3>
+                <table>
+                    <tr><th>记号</th><th>含义</th><th>示例</th></tr>
+                    <tr><td><code>1</code> ~ <code>7</code></td><td>拨动对应数字的琴弦</td><td><code>1 3 5</code> 依次拨宫、角、羽</td></tr>
+                    <tr><td><code>0</code></td><td>停顿（空拍不发声），时长取「停顿」参数</td><td><code>1 0 3</code> 拨宫、歇一拍、拨角</td></tr>
+                    <tr><td><code>+</code></td><td>和弦：加号相连的弦<b>同时</b>弹响</td><td><code>1+3+5</code> 三弦齐拨</td></tr>
+                    <tr><td><code>音:毫秒</code></td><td>该音结束后间隔指定毫秒再弹下一个</td><td><code>1:800</code> 拨宫后等 800 毫秒</td></tr>
+                    <tr><td><code>0:毫秒</code></td><td>自定义停顿时长（覆盖「停顿」参数）</td><td><code>0:1500</code> 停 1.5 秒</td></tr>
+                    <tr><td><code>#</code></td><td>注释行，写给写谱人看，不参与演奏</td><td><code># 《梅花三弄》片段</code></td></tr>
+                    <tr><td>空格 / 换行 / <code>|</code></td><td>分隔音符；<code>|</code> 为小节线，仅便于阅读</td><td><code>1 2 | 3 4</code></td></tr>
+                </table>
+                
+                <h3>四、演奏参数</h3>
+                <ul>
+                    <li><b>速度</b>：相邻音符的默认间隔（100-1500 毫秒），调小更快、调大更慢</li>
+                    <li><b>停顿</b>：曲谱中 <code>0</code> 的默认时长（100-3000 毫秒）；写 <code>0:毫秒</code> 时以曲谱为准</li>
+                    <li><b>音量</b>：总响度，可放大到 150%</li>
+                    <li><b>柔和 / 明亮</b>：两套合成音色，点击切换时自动试听</li>
+                </ul>
+                
+                <h3>五、音色怎么选</h3>
+                <ul>
+                    <li><b>柔和</b>：泛音少、余韵绵长、音头内敛——适合慢板抒情的曲子，如《阳关三叠》的离别之意</li>
+                    <li><b>明亮</b>：泛音丰富、颗粒清晰、音色通透——适合快板与华彩段落，如《高山流水》的激越之感</li>
+                    <li>同一首曲子换音色弹一遍，往往能得到完全不同的味道</li>
+                </ul>
+                
+                <h3>六、写曲谱示例</h3>
+                <p>最简单的旋律——七个数字就是一根弦一个音：</p>
+                <pre>1 2 3 5 3 2 1</pre>
+                <p>用和弦加厚声音（低音 + 高音同弹，像按下一个"和音"）：</p>
+                <pre>1+5 2+6 3+7 2+6 1+5</pre>
+                <p>用停顿让旋律"换口气"，用 <code>:毫秒</code> 做渐慢的结尾：</p>
+                <pre>1 2 3 5 0 6 5 3 2:600 1:1200 1+5:2000</pre>
+                <p>写好后点「演奏曲谱」即可；点击上方示范曲谱可直接载入名曲片段，改改数字再弹，就是你的创作了。</p>
+            </div>
+        </details>
+    </div>
+    
+    <footer>
+        <p>© 2025 古琴模拟器 · 水墨版 | 体验中国传统音乐之美</p>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // =====================================================
+            //  古琴音色引擎
+            //  多泛音合成 + 木质共鸣 + 拨弦瞬态 + 微揉弦 + 混响
+            //  双音色：柔和 / 明亮
+            // =====================================================
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            const audioCtx = new AudioContext();
+            const MASTER_VOLUME = 1.0;
+            
+            // ----- 主输出总线：音量 + 峰值压缩器（防削波） -----
+            const masterGain = audioCtx.createGain();
+            masterGain.gain.value = MASTER_VOLUME;
+            const compressor = audioCtx.createDynamicsCompressor();
+            compressor.threshold.value = -8;
+            compressor.knee.value = 18;
+            compressor.ratio.value = 6;
+            compressor.attack.value = 0.001;
+            compressor.release.value = 0.22;
+            masterGain.connect(compressor);
+            
+            // 软限幅器（tanh 饱和曲线）：多音叠加的峰值被温柔压住，
+            // 大信号时呈暖饱和感而非硬削波爆音（和弦/快速连点杂音的关键解法）
+            function makeSoftClipCurve(n) {
+                const curve = new Float32Array(n);
+                const k = 1.2;
+                for (let i = 0; i < n; i++) {
+                    const x = (i / (n - 1)) * 2 - 1;
+                    curve[i] = Math.tanh(k * x) / k;
+                }
+                return curve;
+            }
+            const softLimiter = audioCtx.createWaveShaper();
+            softLimiter.curve = makeSoftClipCurve(4096);
+            softLimiter.oversample = '4x';   // 过采样减少混叠失真
+            const makeupGain = audioCtx.createGain();
+            makeupGain.gain.value = 1.35;    // 补偿软限幅的压低，响度不损失
+            compressor.connect(softLimiter);
+            softLimiter.connect(makeupGain);
+            makeupGain.connect(audioCtx.destination);
+            
+            // ----- 混响：程序生成房间脉冲响应 -----
+            function createReverbImpulse(duration, decay) {
+                const rate = audioCtx.sampleRate;
+                const length = rate * duration;
+                const impulse = audioCtx.createBuffer(2, length, rate);
+                for (let ch = 0; ch < 2; ch++) {
+                    const data = impulse.getChannelData(ch);
+                    for (let i = 0; i < length; i++) {
+                        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+                    }
+                }
+                return impulse;
+            }
+            const convolver = audioCtx.createConvolver();
+            convolver.buffer = createReverbImpulse(1.9, 2.8);
+            const reverbGain = audioCtx.createGain();
+            reverbGain.gain.value = 0.2;
+            convolver.connect(reverbGain);
+            reverbGain.connect(compressor);
+            
+            // ----- 拨弦瞬态噪声源 -----
+            const noiseBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.12), audioCtx.sampleRate);
+            {
+                const data = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < data.length; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+            }
+            
+            // 浏览器自动播放策略
+            function resumeAudio() {
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+            }
+            document.addEventListener('click', resumeAudio);
+            document.addEventListener('touchstart', resumeAudio);
+            document.addEventListener('keydown', resumeAudio);
+            
+            // ----- 两套音色参数 -----
+            const TONES = {
+                warm: {
+                    partials: [
+                        { mult: 1.0, gain: 1.00, decay: 5.0 },
+                        { mult: 2.0, gain: 0.28, decay: 3.2 },
+                        { mult: 3.0, gain: 0.09, decay: 2.0 },
+                        { mult: 4.0, gain: 0.035, decay: 1.2 }
+                    ],
+                    noiseGain: 0.05,
+                    noiseFreq: 1300,
+                    filterStart: 1700,
+                    filterEnd: 650,
+                    bodyGain: 3.0,
+                    lfoDepth: 2,
+                    reverb: 0.16
+                },
+                bright: {
+                    partials: [
+                        { mult: 1.0, gain: 1.00, decay: 5.2 },
+                        { mult: 2.0, gain: 0.40, decay: 3.4 },
+                        { mult: 3.0, gain: 0.16, decay: 2.3 },
+                        { mult: 4.0, gain: 0.07, decay: 1.7 },
+                        { mult: 5.0, gain: 0.035, decay: 1.2 },
+                        { mult: 6.2, gain: 0.018, decay: 0.85 }
+                    ],
+                    noiseGain: 0.11,
+                    noiseFreq: 1900,
+                    filterStart: 2600,
+                    filterEnd: 850,
+                    bodyGain: 3.5,
+                    lfoDepth: 2.5,
+                    reverb: 0.2
+                }
+            };
+            let currentTone = 'warm';
+            
+            // 古琴定弦（宫商角徵羽文武）
+            const baseFreq = [130.81, 146.83, 164.81, 196.00, 220.00, 246.94, 293.66];
+            
+            // 活动发声单元
+            const activeVoices = [];
+            
+            // 每弦当前发声单元：同弦再拨时旧音快速淡出（模拟真实琴弦重拨即重新起振）
+            const stringVoices = [[], [], [], [], [], [], []];
+            
+            // 全局发声注册：复音数上限，防止疯狂连点时发声堆积
+            const voiceRegistry = [];
+            const MAX_VOICES = 10;
+            
+            // 平滑淡出一个发声单元（无爆音）
+            function fadeOutVoice(gainNode, t, fadeTime) {
+                try {
+                    gainNode.gain.cancelScheduledValues(t);
+                    gainNode.gain.setValueAtTime(gainNode.gain.value, t);
+                    gainNode.gain.linearRampToValueAtTime(0.0001, t + fadeTime);
+                } catch (e) { /* 已失效 */ }
+            }
+            
+            // ----- 发出一个音 -----
+            function playNote(stringNumber, velocity) {
+                resumeAudio();
+                velocity = velocity || 1;
+                const tone = TONES[currentTone];
+                const t = audioCtx.currentTime;
+                const freq = baseFreq[stringNumber - 1];
+                
+                const voiceGain = audioCtx.createGain();
+                voiceGain.gain.value = 0.9 * velocity;
+                
+                // 同弦再拨：旧音 50ms 内快速淡出，新旧波形不再叠加打架
+                const sIdx = stringNumber - 1;
+                stringVoices[sIdx].forEach(function(oldGain) {
+                    fadeOutVoice(oldGain, t, 0.05);
+                });
+                stringVoices[sIdx] = [voiceGain];
+                
+                // 复音数上限：超过时把最老的发声平滑淡出
+                voiceRegistry.push(voiceGain);
+                while (voiceRegistry.length > MAX_VOICES) {
+                    fadeOutVoice(voiceRegistry.shift(), t, 0.08);
+                }
+                setTimeout(function() {
+                    const i = voiceRegistry.indexOf(voiceGain);
+                    if (i !== -1) voiceRegistry.splice(i, 1);
+                }, 6500);
+                
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(tone.filterStart, t);
+                filter.frequency.exponentialRampToValueAtTime(tone.filterEnd, t + 4.0);
+                filter.Q.value = 0.9;
+                
+                const body = audioCtx.createBiquadFilter();
+                body.type = 'peaking';
+                body.frequency.value = 220;
+                body.Q.value = 1.1;
+                body.gain.value = tone.bodyGain;
+                
+                filter.connect(body);
+                body.connect(voiceGain);
+                
+                // 声像：宫弦居左 → 武弦居右
+                let voiceOut = voiceGain;
+                if (audioCtx.createStereoPanner) {
+                    const pan = audioCtx.createStereoPanner();
+                    pan.pan.value = (stringNumber - 4) / 3 * 0.65;
+                    voiceGain.connect(pan);
+                    voiceOut = pan;
+                }
+                voiceOut.connect(masterGain);
+                voiceOut.connect(convolver);
+                
+                // 微揉弦
+                const lfo = audioCtx.createOscillator();
+                lfo.frequency.value = 0.35 + Math.random() * 0.25;
+                const lfoGain = audioCtx.createGain();
+                lfoGain.gain.setValueAtTime(0, t);
+                lfoGain.gain.linearRampToValueAtTime(tone.lfoDepth, t + 0.45);
+                lfo.connect(lfoGain);
+                lfo.start(t);
+                lfo.stop(t + 5.5);
+                
+                // 泛音列合成
+                tone.partials.forEach(function(p) {
+                    const osc = audioCtx.createOscillator();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq * p.mult * (1 + (Math.random() - 0.5) * 0.0016), t);
+                    lfoGain.connect(osc.detune);
+                    
+                    const pGain = audioCtx.createGain();
+                    pGain.gain.setValueAtTime(0.0001, t);
+                    pGain.gain.linearRampToValueAtTime(p.gain * 0.36, t + 0.008);
+                    pGain.gain.exponentialRampToValueAtTime(0.0001, t + p.decay);
+                    
+                    osc.connect(pGain);
+                    pGain.connect(filter);
+                    osc.start(t);
+                    osc.stop(t + p.decay + 0.05);
+                    activeVoices.push(osc);
+                    osc.onended = function() {
+                        const idx = activeVoices.indexOf(osc);
+                        if (idx !== -1) activeVoices.splice(idx, 1);
+                    };
+                });
+                
+                // 拨弦瞬态
+                if (tone.noiseGain > 0) {
+                    const noise = audioCtx.createBufferSource();
+                    noise.buffer = noiseBuffer;
+                    const noiseFilter = audioCtx.createBiquadFilter();
+                    noiseFilter.type = 'bandpass';
+                    noiseFilter.frequency.value = tone.noiseFreq;
+                    noiseFilter.Q.value = 1.1;
+                    const noiseGain = audioCtx.createGain();
+                    noiseGain.gain.setValueAtTime(tone.noiseGain * velocity, t);
+                    noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+                    noise.connect(noiseFilter);
+                    noiseFilter.connect(noiseGain);
+                    noiseGain.connect(voiceGain);
+                    noise.start(t);
+                    noise.stop(t + 0.14);
+                }
+                
+                visualFeedback(stringNumber);
+            }
+            
+            function playChord(notes, velocity) {
+                notes.forEach(function(n) { playNote(n, velocity); });
+            }
+            
+            // ----- 视觉反馈 -----
+            function visualFeedback(stringNumber) {
+                const stringElement = document.querySelector('.string[data-note="' + stringNumber + '"]');
+                if (!stringElement) return;
+                
+                stringElement.classList.remove('plucked');
+                void stringElement.offsetWidth;
+                stringElement.classList.add('plucked');
+                setTimeout(function() {
+                    stringElement.classList.remove('plucked');
+                }, 460);
+                
+                const container = document.querySelector('.guqin-container');
+                const ripple = document.createElement('div');
+                ripple.classList.add('ripple');
+                const rect = stringElement.getBoundingClientRect();
+                const contRect = container.getBoundingClientRect();
+                ripple.style.left = (rect.left - contRect.left + rect.width / 2 - 3) + 'px';
+                ripple.style.top = (rect.top - contRect.top + rect.height / 2 - 3) + 'px';
+                container.appendChild(ripple);
+                setTimeout(function() { ripple.remove(); }, 750);
+            }
+            
+            // =====================================================
+            //  输入系统（Pointer Events）
+            // =====================================================
+            const playfield = document.querySelector('.guqin-strings');
+            const pointerNotes = new Map();
+            
+            function noteAt(x, y) {
+                const el = document.elementFromPoint(x, y);
+                return el && el.classList.contains('string') ? parseInt(el.getAttribute('data-note')) : null;
+            }
+            
+            playfield.addEventListener('pointerdown', function(e) {
+                const s = e.target.closest('.string');
+                if (!s) return;
+                const note = parseInt(s.getAttribute('data-note'));
+                playNote(note);
+                pointerNotes.set(e.pointerId, note);
+                e.preventDefault();
+            });
+            
+            window.addEventListener('pointermove', function(e) {
+                if (!pointerNotes.has(e.pointerId)) return;
+                const note = noteAt(e.clientX, e.clientY);
+                const last = pointerNotes.get(e.pointerId);
+                if (note && note !== last) {
+                    pointerNotes.set(e.pointerId, note);
+                    playNote(note);
+                }
+            });
+            
+            function endPointer(e) {
+                pointerNotes.delete(e.pointerId);
+            }
+            window.addEventListener('pointerup', endPointer);
+            window.addEventListener('pointercancel', endPointer);
+            
+            // ----- 键盘弹奏 -----
+            const keyMap = {
+                '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7,
+                'a': 1, 's': 2, 'd': 3, 'f': 4, 'g': 5, 'h': 6, 'j': 7
+            };
+            document.addEventListener('keydown', function(e) {
+                if (e.repeat) return;
+                if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+                const note = keyMap[e.key.toLowerCase()];
+                if (note) playNote(note);
+            });
+            
+            // =====================================================
+            //  曲谱引擎
+            // =====================================================
+            const scoreEl = document.getElementById('score');
+            const speedEl = document.getElementById('speed');
+            const restEl = document.getElementById('rest');
+            const speedOut = document.getElementById('speed-out');
+            const restOut = document.getElementById('rest-out');
+            
+            function parseScore(text) {
+                const events = [];
+                text.split('\n').forEach(function(line) {
+                    const trimmed = line.trim();
+                    if (!trimmed || trimmed.charAt(0) === '#') return;
+                    trimmed.split(/[\s|]+/).forEach(function(token) {
+                        if (!token) return;
+                        let duration = null;
+                        const m = token.match(/^(.+?):(\d+)$/);
+                        let body = token;
+                        if (m) {
+                            body = m[1];
+                            duration = parseInt(m[2], 10);
+                        }
+                        if (body === '0') {
+                            events.push({ notes: [], duration: duration });
+                            return;
+                        }
+                        const notes = body.split('+').map(function(x) {
+                            return parseInt(x, 10);
+                        }).filter(function(n) {
+                            return n >= 1 && n <= 7;
+                        });
+                        if (notes.length) {
+                            events.push({ notes: notes, duration: duration });
+                        }
+                    });
+                });
+                return events;
+            }
+            
+            function playScore(events) {
+                stopAll();
+                const speed = parseInt(speedEl.value, 10);
+                const rest = parseInt(restEl.value, 10);
+                
+                let delay = 0;
+                events.forEach(function(ev) {
+                    const id = setTimeout(function() {
+                        if (ev.notes.length) {
+                            const velocity = 0.9 + Math.random() * 0.25;
+                            if (ev.notes.length > 1) {
+                                playChord(ev.notes, velocity);
+                            } else {
+                                playNote(ev.notes[0], velocity);
+                            }
+                        }
+                    }, delay);
+                    playTimers.push(id);
+                    
+                    if (ev.duration != null) {
+                        delay += ev.duration;
+                    } else {
+                        delay += ev.notes.length ? speed : rest;
+                    }
+                });
+            }
+            
+            let playTimers = [];
+            function stopAll() {
+                playTimers.forEach(function(id) { clearTimeout(id); });
+                playTimers = [];
+                // 平滑淡出所有在响的发声（30ms），再停止振荡器，静音无爆音
+                const t = audioCtx.currentTime;
+                stringVoices.forEach(function(list) {
+                    list.forEach(function(g) { fadeOutVoice(g, t, 0.03); });
+                    list.length = 0;
+                });
+                voiceRegistry.length = 0;
+                const voices = activeVoices.slice();
+                activeVoices.length = 0;
+                voices.forEach(function(osc) {
+                    try { osc.stop(t + 0.04); } catch (e) { /* 已停止 */ }
+                });
+            }
+            
+            // =====================================================
+            //  UI 绑定
+            // =====================================================
+            const EXAMPLE_SCORE =
+                '# 在这里输入曲谱，点「演奏曲谱」自动弹奏\n' +
+                '# 语法：1-7 拨弦 | 0 停顿 | 1+3+5 和弦同弹 | 音:毫秒 自定义间隔\n' +
+                '1 3 5 3 1 3 5 3 5 6 5 3 2\n' +
+                '0:800\n' +
+                '5 6 5 3 2 1 2 3 5\n' +
+                '1+3+5:1200 2+4:800 1+5';
+            
+            const songTexts = {
+                1: '# 《梅花三弄》片段\n1 3 5 3 1 3 5 3 5 6 5 3 2',
+                2: '# 《阳关三叠》片段\n5 6 5 3 2 1 2 3 5 3 2 1 6 5',
+                3: '# 《高山流水》片段\n1 2 3 5 6 5 3 5 6 1 2 3 2 1 6 5'
+            };
+            
+            scoreEl.value = EXAMPLE_SCORE;
+            
+            document.getElementById('play-score').addEventListener('click', function() {
+                const events = parseScore(scoreEl.value);
+                if (events.length) playScore(events);
+            });
+            document.getElementById('stop-score').addEventListener('click', stopAll);
+            document.getElementById('score-example').addEventListener('click', function() {
+                scoreEl.value = EXAMPLE_SCORE;
+            });
+            document.getElementById('score-clear').addEventListener('click', function() {
+                scoreEl.value = '';
+            });
+            
+            speedEl.addEventListener('input', function(e) {
+                speedOut.textContent = e.target.value + ' ms';
+            });
+            restEl.addEventListener('input', function(e) {
+                restOut.textContent = e.target.value + ' ms';
+            });
+            
+            document.querySelectorAll('.song').forEach(function(song) {
+                song.addEventListener('click', function() {
+                    const songId = song.getAttribute('data-song');
+                    scoreEl.value = songTexts[songId];
+                    playScore(parseScore(songTexts[songId]));
+                });
+            });
+            
+            document.getElementById('play-all').addEventListener('click', function() {
+                playScore(parseScore('1 2 3 4 5 6 7 6 5 4 3 2 1'));
+            });
+            
+            document.getElementById('reset').addEventListener('click', stopAll);
+            
+            document.querySelectorAll('.tone-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    currentTone = btn.getAttribute('data-tone');
+                    document.querySelectorAll('.tone-btn').forEach(function(b) {
+                        b.classList.toggle('active', b === btn);
+                    });
+                    playNote(4, 0.8);
+                });
+            });
+            
+            document.getElementById('volume').addEventListener('input', function(e) {
+                masterGain.gain.value = (e.target.value / 100) * MASTER_VOLUME;
+            });
+            
+            document.getElementById('tutorial').addEventListener('click', function() {
+                alert("欢迎使用古琴模拟器！\n\n" +
+                    "1. 点击或触摸琴弦弹奏，按住横向滑动连续拨弦\n" +
+                    "2. 键盘 1-7 或 A S D F G H J 对应七根弦，多键同按即和弦\n" +
+                    "3. 在曲谱框输入曲谱自动演奏：\n" +
+                    "   0 停顿 · 1+3+5 和弦 · 音:毫秒 自定义间隔\n" +
+                    "4. 「柔和 / 明亮」两套音色随时切换\n" +
+                    "5. 详细曲谱写法见页面下方「使用说明与曲谱写法详解」\n\n" +
+                    "尽情享受古琴的魅力吧！");
+            });
+            
+            // ----- 背景墨点粒子 -----
+            function createParticles() {
+                const particlesContainer = document.getElementById('particles');
+                const particleCount = 40;
+                
+                for (let i = 0; i < particleCount; i++) {
+                    const particle = document.createElement('div');
+                    particle.classList.add('particle');
+                    
+                    const size = Math.random() * 4 + 1;
+                    const posX = Math.random() * 100;
+                    const posY = Math.random() * 100;
+                    
+                    particle.style.width = size + 'px';
+                    particle.style.height = size + 'px';
+                    particle.style.left = posX + 'vw';
+                    particle.style.top = posY + 'vh';
+                    
+                    const animationDuration = Math.random() * 20 + 10;
+                    particle.style.animation = 'float ' + animationDuration + 's linear infinite';
+                    
+                    particlesContainer.appendChild(particle);
+                }
+            }
+            
+            createParticles();
+        });
+    </script>
+</body>
+</html>
